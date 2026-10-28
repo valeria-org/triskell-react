@@ -1,0 +1,62 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+/* Defaults for <TriskelGraph>. Override the custom properties to theme it;
+ * the font must keep BLOCK_METRICS.charWidth per character, or pass block
+ * sizes explicitly. */
+.tg-canvas {
+  --tg-bg: #16161c;
+  --tg-block: #22222b;
+  --tg-block-selected: #2c2a3a;
+  --tg-border: #3a3a46;
+  --tg-border-hover: #6b6b7a;
+  --tg-accent: #a78bfa;
+  --tg-label: var(--tg-accent);
+  --tg-text: #c9c9d4;
+  --tg-flow: #6b6b7a;
+  --tg-taken: #4ade80;
+  --tg-not-taken: #f87171;
+  --tg-back: #a78bfa;
+  --tg-font: 11.3px ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  overflow: auto;
+  background: var(--tg-bg);
+  /* Panning is a drag, so the browser must not also treat it as a swipe. */
+  touch-action: none;
+  cursor: grab;
+}
+.tg-canvas:active { cursor: grabbing; }
+.tg-canvas svg { display: block; user-select: none; }
+
+/* A block's text is the one thing on the drawing worth selecting. */
+.tg-block text {
+  font: var(--tg-font);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.tg-block rect {
+  fill: var(--tg-block);
+  stroke: var(--tg-border);
+  stroke-width: 1;
+  cursor: pointer;
+}
+.tg-block:hover rect { stroke: var(--tg-border-hover); }
+.tg-block.tg-selected rect { fill: var(--tg-block-selected); stroke: var(--tg-accent); stroke-width: 2; }
+.tg-label { fill: var(--tg-label); user-select: none; }
+.tg-line { fill: var(--tg-text); }
+
+/* Colour is the branch's meaning: green taken, red not taken, dashed loops. */
+.tg-edge polyline { fill: none; stroke-width: 1.4; }
+.tg-arrow { stroke: none; }
+.tg-flow polyline { stroke: var(--tg-flow); }
+.tg-flow .tg-arrow { fill: var(--tg-flow); }
+.tg-taken polyline { stroke: var(--tg-taken); }
+.tg-taken .tg-arrow { fill: var(--tg-taken); }
+.tg-not-taken polyline { stroke: var(--tg-not-taken); }
+.tg-not-taken .tg-arrow { fill: var(--tg-not-taken); }
+.tg-back polyline { stroke: var(--tg-back); stroke-dasharray: 4 3; }
+.tg-back .tg-arrow { fill: var(--tg-back); }
