@@ -1,0 +1,53 @@
+{
+  "name": "triskell-react",
+  "version": "0.1.0",
+  "description": "Control-flow graph layout and React view: a TypeScript port of triskel (\"Towards better CFG layouts\")",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/valeria-org/triskell-react.git"
+  },
+  "keywords": [
+    "cfg",
+    "control-flow-graph",
+    "graph-layout",
+    "sugiyama",
+    "sese",
+    "reverse-engineering",
+    "react",
+    "triskel"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./layout": {
+      "types": "./dist/layout/index.d.ts",
+      "import": "./dist/layout/index.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/style.css', 'dist/style.css')\"",
+    "check": "tsc -p tsconfig.json && vitest run",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "react": "^18.3.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
