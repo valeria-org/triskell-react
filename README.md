@@ -103,6 +103,10 @@ export function Function() {
 - **Edges.** `kind` is `flow`, `taken`, `not_taken` or `back` and sets the
   edge's class (`tg-flow`, `tg-taken`, `tg-not-taken`, `tg-back`). The layout
   does not classify edges; that is the caller's knowledge.
+- **Branches.** The edges leaving a block's bottom leave from separate points:
+  `not_taken` (false) on the left, `taken` (true) on the right, a quarter in
+  from each corner. The layout prefers to put the false side's target on the
+  left too, so the two do not cross under the block unless the graph forces it.
 - **Styling.** `style.css` is a default theme driven by custom properties on
   `.tg-canvas` (`--tg-bg`, `--tg-block`, `--tg-accent`, `--tg-taken`, …). The
   canvas scrolls, so give it a height.
@@ -127,6 +131,12 @@ const result = layout(
 
 An edge naming a block that is not in the set is dropped rather than drawn.
 
+`port` on an edge orders the edges leaving its source's bottom, lower further
+left (ties keep input order). Several such edges leave at (i + ½) / n
+of the block's width rather than from its middle, and the ordering phase counts
+the crossings their order makes, so their targets tend to follow it. A lone
+edge leaves from the middle.
+
 ## How the port differs from triskel
 
 Stated because a port that quietly diverges is worse than one that says so.
@@ -137,8 +147,10 @@ Stated because a port that quietly diverges is worse than one that says so.
 - **Edge routing** is channel-based and orthogonal. It is not a transcription
   of the original's `waypoint_creation`, which carries index arithmetic for
   cases this port does not reproduce (top and bottom loops, IO waypoints across
-  region boundaries). Edges are orthogonal and do not cross blocks; they are
-  not point-for-point identical to the C++.
+  region boundaries). Edges are not point-for-point identical to the C++, and
+  a few still contain a diagonal segment (4 of 468 on the test routine).
+- **Ports.** Separate start points for a block's out-edges, and the
+  crossing count that respects them, are this port's addition.
 - **Phantom nodes**, which the original inserts to factor out common edge
   paths, are not ported.
 - **The RTree** the original's renderers use for hit-testing is not needed:

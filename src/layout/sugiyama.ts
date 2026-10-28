@@ -26,7 +26,7 @@
  *   running straight down instead of zig-zagging around real blocks.
  */
 
-import { type EdgeId, type Graph, type NodeId, type Point, attribute } from './graph.js';
+import { INVALID, type EdgeId, type Graph, type NodeId, type Point, attribute } from './graph.js';
 
 /** The space between nodes on a row. */
 export const X_GUTTER = 50;
@@ -44,11 +44,18 @@ export interface SugiyamaResult {
   height: number;
 }
 
+/**
+ * `slots[edge]` orders the edges leaving one block, left to right along its
+ * bottom: they are drawn from separate points there (see `spreadPorts` in
+ * ./index.ts), and the ordering phase counts the crossings that makes.
+ */
 export function sugiyama(
   g: Graph,
   widths: number[],
   heights: number[],
+  slots: readonly (number | undefined)[],
 ): SugiyamaResult {
+  const originalEdges = g.edges.length;
   const flipped = attribute(g.edges.length, false);
   const dummies = new Set<NodeId>();
   /** For each original edge, the chain of edges that replaced it. */
@@ -147,11 +154,33 @@ export function sugiyama(
   size();
   while (layers.length < g.nodeCount) layers.push(0);
 
+  // --- ports ---------------------------------------------------------------
+  // Where each edge meets its source, as a fraction of the source's width:
+  // the middle, except for a block with several edges leaving its bottom,
+  // which leave at (i + ½) / n in slot order. A back edge leaves the top and
+  // keeps the middle. On a long edge it is the first link that leaves.
+  const at = attribute(g.edges.length, 0.5);
+  {
+    const leaving = new Map<NodeId, { link: EdgeId; slot: number }[]>();
+    for (let edge = 0; edge < originalEdges; edge += 1) {
+      const slot = slots[edge];
+      const link = chains.get(edge)?.[0] ?? (g.from(edge) === INVALID ? undefined : edge);
+      if (slot === undefined || link === undefined || flipped[edge]) continue;
+      const list = leaving.get(g.from(link)) ?? [];
+      list.push({ link, slot });
+      leaving.set(g.from(link), list);
+    }
+    for (const list of leaving.values()) {
+      list.sort((a, b) => a.slot - b.slot);
+      list.forEach(({ link }, index) => (at[link] = (index + 0.5) / list.length));
+    }
+  }
+
   // --- rows ----------------------------------------------------------------
   const rows: NodeId[][] = Array.from({ length: layerCount }, () => [] as NodeId[]);
   for (const node of g.nodes()) rows[layers[node]!]?.push(node);
 
-  const orders = order(g, rows, layers);
+  const orders = order(g, rows, layers, at);
   for (const row of rows) row.sort((a, b) => orders[a]! - orders[b]!);
 
   // --- x -------------------------------------------------------------------
@@ -439,9 +468,17 @@ function feasibleTree(g: Graph): number[] {
  *
  * The 24 is the original's, from the reference it cites. Median sweeps alternate
  * direction by round; transpose then swaps adjacent pairs while that helps.
+ *
+ * An edge is placed where it meets each end, not at the end's middle: its
+ * node's order plus `at[edge]` at its source, plus ½ at its target. Two edges
+ * leaving one block from different points therefore cross when their targets
+ * are the other way round, and the count says so — which is what puts a
+ * branch's false side under its left port and its true side under its right.
  */
-function order(g: Graph, rows: NodeId[][], layers: number[]): number[] {
+function order(g: Graph, rows: NodeId[][], layers: number[], at: readonly number[]): number[] {
   const orders = attribute(g.nodeCount, 0);
+  /** Where `edge` meets `node`, on the scale of the orders. */
+  const pos = (node: NodeId, edge: EdgeId) => orders[node]! + (g.from(edge) === node ? at[edge]! : 0.5);
 
   const normalize = () => {
     for (const row of rows) {
@@ -473,8 +510,7 @@ function order(g: Graph, rows: NodeId[][], layers: number[]): number[] {
     const down = round % 2 === 0;
     for (const row of rows) {
       for (const node of row) {
-        const neighbours = (down ? g.children(node) : g.parents(node))
-          .map((other) => orders[other]!)
+        const neighbours = (down ? g.out[node]!.map((edge) => pos(g.to(edge), edge)) : g.in[node]!.map((edge) => pos(g.from(edge), edge)))
           .sort((a, b) => a - b);
         if (neighbours.length > 0) {
           orders[node] = neighbours[Math.floor(neighbours.length / 2)]!;
@@ -484,8 +520,8 @@ function order(g: Graph, rows: NodeId[][], layers: number[]): number[] {
   }
 
   function neighbourOrders(node: NodeId): { top: number[]; bottom: number[] } {
-    const top = g.parents(node).map((other) => orders[other]!).sort((a, b) => a - b);
-    const bottom = g.children(node).map((other) => orders[other]!).sort((a, b) => a - b);
+    const top = g.in[node]!.map((edge) => pos(g.from(edge), edge)).sort((a, b) => a - b);
+    const bottom = g.out[node]!.map((edge) => pos(g.to(edge), edge)).sort((a, b) => a - b);
     return { top, bottom };
   }
 
@@ -540,13 +576,12 @@ function order(g: Graph, rows: NodeId[][], layers: number[]): number[] {
     for (let layer = 0; layer + 1 < rows.length; layer += 1) {
       const sequence: number[] = [];
       for (const node of rows[layer]!) {
-        const below = g
+        const ends = g
           .incident(node)
-          .map((edge) => g.other(edge, node))
-          .filter((other) => layers[other] === layer + 1)
-          .map((other) => orders[other]!)
-          .sort((a, b) => a - b);
-        sequence.push(...below);
+          .filter((edge) => layers[g.other(edge, node)] === layer + 1)
+          .map((edge) => ({ here: pos(node, edge), there: pos(g.other(edge, node), edge) }))
+          .sort((a, b) => a.here - b.here || a.there - b.there);
+        for (const end of ends) sequence.push(end.there);
       }
       total += sortAndCount(sequence);
     }

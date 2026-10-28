@@ -108,6 +108,9 @@ export function blockSize(block: CfgBlock): { width: number; height: number } {
 /** The arrowhead, in layout units. */
 const HEAD = 7;
 
+/** Where an edge leaves its block: a branch's false side left, its true side right. */
+const EDGE_PORT: Record<EdgeKind, number> = { not_taken: -1, flow: 0, back: 0, taken: 1 };
+
 const EDGE_CLASS: Record<EdgeKind, string> = {
   flow: 'tg-flow',
   taken: 'tg-taken',
@@ -143,7 +146,7 @@ export const TriskelGraph = forwardRef<TriskelGraphHandle, TriskelGraphProps>(fu
   const drawn = useMemo(() => {
     const laid = layout(
       blocks.map((block) => ({ id: block.id, ...blockSize(block) })),
-      edges.map((edge, id) => ({ id, from: edge.from, to: edge.to })),
+      edges.map((edge, id) => ({ id, from: edge.from, to: edge.to, port: EDGE_PORT[edge.kind ?? 'flow'] })),
       entry,
     );
     const byId = new Map(blocks.map((block) => [block.id, block]));

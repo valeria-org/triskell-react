@@ -20,7 +20,7 @@ import { Graph } from '../src/layout/graph.js';
 import { Sese } from '../src/layout/sese.js';
 import { Udfs } from '../src/layout/udfs.js';
 import fixture from './fixtures/routine.json';
-import { layout, type InputEdge, type InputNode, type LaidOutNode } from '../src/layout/index.js';
+import { layout, type InputEdge, type InputNode, type LaidOutNode, type Point, type TriskelLayout } from '../src/layout/index.js';
 
 /** `n` blocks of a uniform size. */
 function blocks(count: number, width = 120, height = 40): InputNode[] {
@@ -323,5 +323,80 @@ describe('a real routine', () => {
     const ink = result.nodes.reduce((sum, node) => sum + node.width * node.height, 0);
     expect(ink / (result.width * result.height)).toBeGreaterThan(0.07);
     expect(result.height).toBeLessThan(55_000);
+  });
+
+  test('edges leaving one block start apart', () => {
+    const shared: string[] = [];
+    const starts = new Map<string, number>();
+    for (const edge of result.edges) {
+      const { from, to } = graph[edge.id]!;
+      if (from === to) continue;
+      const key = `${from}@${edge.points[0]!.x.toFixed(1)},${edge.points[0]!.y.toFixed(1)}`;
+      if (starts.has(key)) shared.push(`${from}->${to} and edge ${starts.get(key)}`);
+      starts.set(key, edge.id);
+    }
+    expect(shared).toEqual([]);
+  });
+});
+
+describe('ports', () => {
+  const route = (result: TriskelLayout, id: number) => result.edges.find((edge) => edge.id === id)!.points;
+
+  test("a branch's sides leave the bottom apart and straight down, lower port to the left", () => {
+    // 0 branches to 1 (true, port 1, listed first) and 2 (false, port -1); both rejoin at 3.
+    const result = layout(blocks(4), [
+      { id: 0, from: 0, to: 1, port: 1 },
+      { id: 1, from: 0, to: 2, port: -1 },
+      { id: 2, from: 1, to: 3 },
+      { id: 3, from: 2, to: 3 },
+    ], 0);
+    const source = result.nodes.find((node) => node.id === 0)!;
+    const [yes, no] = [route(result, 0), route(result, 1)];
+    expect(no[0]!.x).toBeLessThan(yes[0]!.x);
+    for (const points of [yes, no]) {
+      expect(points[0]!.y).toBeCloseTo(source.y + source.height, 5);
+      expect(points[1]!.x).toBeCloseTo(points[0]!.x, 5);
+    }
+    // A quarter in from each corner.
+    expect(no[0]!.x - source.x).toBeCloseTo(source.width / 4, 5);
+    expect(yes[0]!.x - source.x).toBeCloseTo((source.width * 3) / 4, 5);
+  });
+
+  test("a branch's two sides do not cross where the graph leaves room", () => {
+    // 0's true side (to 2) is listed first and is the short one; its false
+    // side (to 1) passes 2 to reach a block 2 itself branches to. Ordered by
+    // input alone, 0's two edges leave apart and then cross under it.
+    const result = layout(blocks(4), [
+      { id: 0, from: 0, to: 2, port: 1 },
+      { id: 1, from: 0, to: 1, port: -1 },
+      { id: 2, from: 1, to: 3 },
+      { id: 3, from: 2, to: 3, port: -1 },
+      { id: 4, from: 2, to: 1, port: 1 },
+    ], 0);
+    /** Points where a vertical segment of one polyline passes through a horizontal one of the other. */
+    const crossings = (a: Point[], b: Point[]) => {
+      let count = 0;
+      for (const [p, q] of [[a, b], [b, a]] as const) {
+        for (let i = 0; i + 1 < p.length; i += 1) {
+          const [v1, v2] = [p[i]!, p[i + 1]!];
+          if (Math.abs(v1.x - v2.x) >= 0.5) continue;
+          for (let j = 0; j + 1 < q.length; j += 1) {
+            const [h1, h2] = [q[j]!, q[j + 1]!];
+            if (Math.abs(h1.y - h2.y) >= 0.5) continue;
+            const inX = v1.x > Math.min(h1.x, h2.x) + 0.5 && v1.x < Math.max(h1.x, h2.x) - 0.5;
+            const inY = h1.y > Math.min(v1.y, v2.y) + 0.5 && h1.y < Math.max(v1.y, v2.y) - 0.5;
+            if (inX && inY) count += 1;
+          }
+        }
+      }
+      return count;
+    };
+    expect(crossings(route(result, 0), route(result, 1))).toBe(0);
+  });
+
+  test('a lone edge still leaves from the middle', () => {
+    const result = layout(blocks(2), [{ id: 0, from: 0, to: 1, port: -1 }], 0);
+    const source = result.nodes.find((node) => node.id === 0)!;
+    expect(route(result, 0)[0]!.x).toBeCloseTo(source.x + source.width / 2, 5);
   });
 });

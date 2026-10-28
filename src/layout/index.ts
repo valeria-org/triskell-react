@@ -40,6 +40,12 @@ export interface InputEdge {
   id: number;
   from: number;
   to: number;
+  /**
+   * Where the edge leaves its source, among the source's other edges leaving
+   * its bottom: lower is further left. Ties keep the input order. For a
+   * conditional branch, give the false side the lower number.
+   */
+  port?: number;
 }
 
 export interface LaidOutNode {
@@ -93,13 +99,23 @@ export function layout(
   g.root = index.get(entry) ?? 0;
 
   const edgeIndex = new Map<EdgeId, number>();
+  const ports: number[] = [];
   for (const edge of edges) {
     const from = index.get(edge.from);
     const to = index.get(edge.to);
     // An edge to a block outside the set is not drawable, and inventing a
     // target for it would put a line on the picture nothing supports.
     if (from === undefined || to === undefined) continue;
-    edgeIndex.set(g.makeEdge(from, to), edge.id);
+    const id = g.makeEdge(from, to);
+    edgeIndex.set(id, edge.id);
+    ports[id] = edge.port ?? 0;
+  }
+  // Each block's edges in port order, ties in input order: their slots.
+  const slots: number[] = [];
+  for (const node of g.nodes()) {
+    [...g.out[node]!]
+      .sort((a, b) => ports[a]! - ports[b]! || a - b)
+      .forEach((edge, slot) => (slots[edge] = slot));
   }
 
   const original = { nodes: g.nodeCount, edges: g.edges.length };
@@ -167,6 +183,7 @@ export function layout(
     };
 
     const subEdges = new Map<EdgeId, EdgeId>();
+    const subSlots: (number | undefined)[] = [];
     for (const edge of g.edgeIds().filter((id) => id < original.edges)) {
       const from = resolve(g.from(edge));
       const to = resolve(g.to(edge));
@@ -177,7 +194,11 @@ export function layout(
       // means both are inside the same child region, where the edge is drawn
       // on its own — so it belongs to that region and not to this one.
       if (from === to && g.from(edge) !== g.to(edge)) continue;
-      subEdges.set(sub.makeEdge(from, to), edge);
+      const subEdge = sub.makeEdge(from, to);
+      subEdges.set(subEdge, edge);
+      // A slot orders one block's edges; edges leaving a region's box come
+      // from whichever blocks inside it, and have no order between them.
+      if (!childOf.has(from)) subSlots[subEdge] = slots[edge];
     }
 
     // The root region has no entry *edge*, so it has no `entryNode`; its root
@@ -190,7 +211,7 @@ export function layout(
       local.get(members[0] ?? 0) ??
       0;
 
-    const result = sugiyama(sub, subWidths, subHeights);
+    const result = sugiyama(sub, subWidths, subHeights, subSlots);
 
     for (const [node, id] of local) {
       const child = childOf.get(id);
@@ -329,6 +350,7 @@ export function layout(
     if (target && !touches(moved[moved.length - 1]!, target)) moved = reach(moved, target, false);
     outEdges.push({ id, points: moved });
   }
+  spreadPorts(outEdges, placedNode, ends);
 
   return {
     nodes: outNodes,
@@ -337,4 +359,76 @@ export function layout(
     height: maxY - minY + Y_GUTTER * 2,
     regions: sese.regions.length,
   };
+}
+
+/** How far below its block a rerouted edge turns back to its old column. */
+const JOG = 10;
+
+/**
+ * Give each edge leaving the bottom of one block a start of its own.
+ *
+ * The region layouts start every out-edge at the block's bottom centre, so
+ * the two sides of a branch leave from one point and only part where they
+ * turn: which side is which is then a matter of following both. Spread over
+ * the bottom, in `port` order, at `(i + ½) / n` of the width (a quarter in
+ * from each corner for a branch), they leave apart.
+ *
+ * Only the start moves. Where the edge ran straight down to a turn, its first
+ * leg moves with the start; where the target is straight below and the new
+ * column still lands on it, the whole edge moves; otherwise it jogs back to
+ * its old column just below the block, so the route through the rest of the
+ * drawing — which the layout checked against every block — is kept.
+ */
+function spreadPorts(
+  edges: LaidOutEdge[],
+  nodes: Map<number, LaidOutNode>,
+  ends: Map<number, InputEdge>,
+): void {
+  const bySource = new Map<number, LaidOutEdge[]>();
+  for (const edge of edges) {
+    const input = ends.get(edge.id);
+    const source = input && nodes.get(input.from);
+    if (!input || !source || input.from === input.to) continue;
+    const start = edge.points[0]!;
+    // Back edges leave the top and self loops the side: only the bottom is shared.
+    if (Math.abs(start.y - (source.y + source.height)) >= 0.5) continue;
+    const list = bySource.get(input.from) ?? [];
+    list.push(edge);
+    bySource.set(input.from, list);
+  }
+
+  for (const [from, list] of bySource) {
+    if (list.length < 2) continue;
+    const source = nodes.get(from)!;
+    // `sort` is stable, so equal ports keep the input order.
+    list.sort((a, b) => (ends.get(a.id)!.port ?? 0) - (ends.get(b.id)!.port ?? 0));
+    list.forEach((edge, index) => {
+      const target = nodes.get(ends.get(edge.id)!.to);
+      const x = source.x + (source.width * (index + 0.5)) / list.length;
+      edge.points = startAt(edge.points, x, target);
+    });
+  }
+}
+
+/** `points` leaving from column `x` instead, kept orthogonal. */
+function startAt(points: Point[], x: number, target: LaidOutNode | undefined): Point[] {
+  const start = points[0]!;
+  const old = start.x;
+  if (Math.abs(x - old) < 0.5) return points;
+  // The leading vertical run: points[0..k] share the start's column.
+  let k = 0;
+  while (k + 1 < points.length && Math.abs(points[k + 1]!.x - old) < 0.5) k += 1;
+  const last = points.length - 1;
+
+  // Down to a turn right below the block: move the first leg with the start.
+  if (k === 1 && k < last) {
+    return [{ x, y: start.y }, { x, y: points[1]!.y }, ...points.slice(2)];
+  }
+  // Straight down onto the target, which the new column still meets.
+  if (k === last && target && x > target.x + 4 && x < target.x + target.width - 4) {
+    return [{ x, y: start.y }, { x, y: points[last]!.y }];
+  }
+  // Anything else keeps its route and joins it just below the block.
+  const y = start.y + Math.min(JOG, ((points[1]?.y ?? start.y) - start.y) / 2);
+  return [{ x, y: start.y }, { x, y }, { x: old, y }, ...points.slice(1)];
 }
