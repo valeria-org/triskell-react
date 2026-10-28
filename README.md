@@ -45,7 +45,7 @@ Bugs in this port are ours, not triskel's. Please report them
 ## Install
 
 ```sh
-npm install github:valeria-org/triskell-react
+npm install git+https://github.com/valeria-org/triskell-react.git
 ```
 
 React 18 or later is a peer dependency. The layout alone (`triskell-react/layout`)
